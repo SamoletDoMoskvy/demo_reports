@@ -23,3 +23,4 @@ pip install -r requirements.txt
 ```bash
 python main.py run -t <api_token> -c <count_of_report_workers>
 ```
+><count_of_report_workers> is a optional param, by default equals 2
