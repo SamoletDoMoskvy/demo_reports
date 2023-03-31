@@ -11,7 +11,7 @@
 git clone https://github.com/SamoletDoMoskvy/demo_reports
 ```
 
-2. Create a virtual environment and install dependecies
+2. Create a virtual environment and install dependencies
 ```bash
 cd demo_reports
 python -m venv venv
