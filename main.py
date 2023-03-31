@@ -11,6 +11,7 @@ from enum import Enum
 import argparse
 
 
+# Define CLI arguments
 arguments_parser = argparse.ArgumentParser(
     prog="demo_reports",
     epilog="Example usage: python main.py run -t <api_token> -c <int>",
@@ -24,6 +25,7 @@ arguments_parser.add_argument(
     "-c", "--count-workers", help="Count of report workers", default=2, type=int
 )
 
+# Define Logger settings
 logging.basicConfig(
     level=logging.DEBUG,
     filename="demo.log",
@@ -68,8 +70,6 @@ class Loader:
 
     @classmethod
     async def write_data_into_csv_file(cls, data: dict) -> None:
-        if not data:
-            logger.warning(f"[Loader] Empty data. Skipping.")
         async with aiofiles.open(cls._filename, "a") as file:
             async_writer = AsyncWriter(file, delimiter=";")
             await async_writer.writerow(list(data.values()))
