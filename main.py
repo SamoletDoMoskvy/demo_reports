@@ -1,14 +1,38 @@
 from aiohttp import ClientSession
+import aiofiles
+from aiocsv import AsyncWriter
 
 import asyncio
 import logging
 import time
 import uuid
+import sys
 from enum import Enum
+import argparse
 
-logging.basicConfig()
+
+arguments_parser = argparse.ArgumentParser(
+    prog="demo_reports",
+    epilog="Example usage: python main.py run -t <api_token> -c <int>",
+)
+
+arguments_parser.add_argument("run", help="Run program", default=True, type=bool)
+arguments_parser.add_argument(
+    "-t", "--token", help="API token", required=True, type=str
+)
+arguments_parser.add_argument(
+    "-c", "--count-workers", help="Count of report workers", default=2, type=int
+)
+
+logging.basicConfig(
+    level=logging.DEBUG,
+    filename="demo.log",
+    format="%(asctime)s %(levelname)s %(message)s",
+)
 logger = logging.getLogger()
-logger.setLevel(logging.DEBUG)
+stream_handler = logging.StreamHandler(sys.stdout)
+stream_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+logger.addHandler(stream_handler)
 
 
 class HTTPMethods(Enum):
@@ -35,14 +59,30 @@ class StatusCodeDescription(Enum):
         "400": "The request path or body does not match the specification.",
         "401": "Authorization failed.",
         "409": "A report with this id already exists.",
+        "429": "Limit is exceeded.",
     }
+
+
+class Loader:
+    _filename = "demo_output.csv"
+
+    @classmethod
+    async def write_data_into_csv_file(cls, data: dict) -> None:
+        if not data:
+            logger.warning(f"[Loader] Empty data. Skipping.")
+        async with aiofiles.open(cls._filename, "a") as file:
+            async_writer = AsyncWriter(file, delimiter=";")
+            await async_writer.writerow(list(data.values()))
+            logger.info(f"[Loader] Write data to file. Data: {data}")
 
 
 class Extractor:
     URL: str = "https://analytics.maximum-auto.ru/vacancy-test/api/v0.1"
-    # URL = "https://dummyjson.com/products"
-    _token: str = "f105a919-6875-4972-8331-f1906a77df4"
-    _reports_queue = asyncio.Queue()
+
+    def __init__(self, api_token: str, number_of_workers: int):
+        self._token: str = api_token
+        self._number_of_workers = number_of_workers
+        self._reports_queue = asyncio.Queue()
 
     async def _send_request(
         self,
@@ -59,18 +99,18 @@ class Extractor:
             url = f"{self.URL}/{path}" if path else self.URL
             kwargs = dict(method=api_method.value, url=url, headers=headers)
             kwargs.update(dict(json=payload)) if payload else None
-            async with session.request(**kwargs) as resposne:
-                if resposne.status == 200:
-                    response_data = await resposne.json()
+            async with session.request(**kwargs) as response:
+                if response.status == 200:
+                    response_data = await response.json()
                 else:
-                    response_data = await resposne.text()
-                return resposne.status, response_data
+                    response_data = await response.text()
+                return response.status, response_data
 
     async def _reports_worker(self, queue, worker_name: str | None = None):
         logger.info(f"Running worker #{worker_name}")
         while True:
             queue_data: dict = await queue.get()
-            logger.info(f"[Worker] #{worker_name}: get a queue_data: {queue_data}")
+            logger.info(f"[Worker]#{worker_name}: get a queue_data: {queue_data}")
             status_code: int | None = None
             while status_code != 200 or not status_code:
                 logger.info(
@@ -79,11 +119,8 @@ class Extractor:
                 status_code, response_data = await self._send_request(
                     api_method=HTTPMethods.GET,
                     payload=queue_data,
-                    path=f"{APINamespaces.reports.value}/{queue_data.get('id')}",
+                    path=f"{APINamespaces.reports.value}/{queue_data.get('uuid')}",
                 )
-                # logger.info(
-                #     f"[Worker]#{worker_name}: Sent a request for receive report [{status_code}]"
-                # )
                 status_code_description = StatusCodeDescription.reports_get.value.get(
                     str(status_code)
                 )
@@ -99,6 +136,7 @@ class Extractor:
                     await asyncio.sleep(1)
 
             queue.task_done()
+            await Loader.write_data_into_csv_file(queue_data)
             logging.info(f"#{worker_name}: task_done()")
 
     async def _request_report_creation(self):
@@ -110,7 +148,6 @@ class Extractor:
                 api_method=HTTPMethods.PUT,
                 path=f"{APINamespaces.reports.value}/{_uuid}",
             )
-            # logger.info(f"[Report Creation] Sent a request for report creation [{status_code}]")
             status_code_description = StatusCodeDescription.reports_put_post.value.get(
                 str(status_code)
             )
@@ -132,11 +169,16 @@ class Extractor:
     async def run(self):
         logger.info("Running program!")
         tasks = [self._request_report_creation()]
-        for i in range(2):
+        for i in range(self._number_of_workers):
             task = self._reports_worker(self._reports_queue, f"Reports_{i}")
             tasks.append(task)
         await asyncio.gather(*tasks, return_exceptions=True)
 
 
-extractor = Extractor()
-asyncio.run(extractor.run())
+if __name__ == "__main__":
+    arguments = arguments_parser.parse_args().__dict__
+    if arguments.get("run"):
+        token = arguments.get("token")
+        count_workers = arguments.get("count_workers")
+        extractor = Extractor(token, count_workers)
+        asyncio.run(extractor.run())
