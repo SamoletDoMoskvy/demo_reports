@@ -15,7 +15,7 @@ git clone https://github.com/SamoletDoMoskvy/demo_reports
 ```bash
 cd demo_reports
 python -m venv venv
-source /venv/bin/activate
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
